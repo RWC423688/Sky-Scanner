@@ -1,0 +1,452 @@
+<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body style="margin:0"><title>Cheshire Sky Radar</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: an air-traffic scope on the left, a sortable traffic strip board on the right; stacks on phones. Single dark theme by choice, like a real ATC display. */
+:root{
+  --ground:#0b1418;      /* room behind the scope */
+  --scope:#0f2026;       /* scope glass */
+  --panel:#12232a;       /* strip board */
+  --line:#24404a;        /* rings, borders */
+  --ink:#d7e6e8;         /* main text */
+  --muted:#7f9ba2;       /* secondary text */
+  --sweep:#7fd8e4;       /* sweep beam, rings labels */
+  --target:#f2b54a;      /* aircraft */
+  --rotor:#ff8a6b;       /* helicopters */
+  --alert:#ff4d5e;       /* emergency squawks */
+  --ok:#5fd39a;          /* live status */
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{background:var(--ground);color:var(--ink)}
+body{font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{max-width:1180px;margin:0 auto;padding-block:16px 28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 18px}
+h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.04em;text-transform:uppercase;margin:0;line-height:1;text-wrap:balance}
+h1 span{color:var(--sweep)}
+.status{display:flex;align-items:center;gap:8px;font-family:var(--f-data);font-size:12px;color:var(--muted)}
+.chip{font-family:var(--f-data);font-size:11px;font-weight:600;letter-spacing:.08em;padding:3px 8px;border-radius:3px;border:1px solid currentColor}
+.chip.live{color:var(--ok)}
+.chip.demo{color:var(--target)}
+.chip.wait{color:var(--muted)}
+.banner{border:1px solid var(--target);color:var(--ink);background:color-mix(in srgb,var(--target) 10%,transparent);border-radius:4px;padding:10px 12px;font-size:13px}
+.banner b{color:var(--target)}
+.controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.ctl{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--f-display);font-weight:600}
+select,button{font-family:var(--f-body);font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;cursor:pointer}
+button:hover,select:hover{border-color:var(--sweep)}
+button:focus-visible,select:focus-visible,input:focus-visible,.row:focus-visible{outline:2px solid var(--sweep);outline-offset:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:6px 10px;font-family:var(--f-data);font-size:12px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--sweep);color:var(--ground);font-weight:600}
+label.tog{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer}
+label.tog input{accent-color:var(--rotor)}
+.main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:820px){.main{grid-template-columns:minmax(0,1fr)}}
+.scopebox{position:relative;width:100%;max-width:100%;aspect-ratio:1/1;border-radius:50%;background:radial-gradient(circle at 50% 50%,#13303a 0%,var(--scope) 62%,#0a171b 100%);box-shadow:0 0 0 1px var(--line),0 0 0 8px #0d1a1f,0 0 0 9px var(--line);overflow:hidden}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:manipulation}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.card h2{font-family:var(--f-display);font-weight:600;font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;display:flex;justify-content:space-between;gap:8px}
+.card h2 span{font-family:var(--f-data);font-size:12px;letter-spacing:0;text-transform:none;color:var(--ink)}
+.detail .cs{font-family:var(--f-display);font-size:28px;font-weight:700;letter-spacing:.04em;line-height:1}
+.detail .sub{color:var(--muted);font-size:13px;margin-top:2px}
+.kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;margin-top:12px}
+@media (max-width:420px){.kv{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kv div{display:flex;flex-direction:column;min-width:0}
+.kv small{font-family:var(--f-display);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kv b{font-family:var(--f-data);font-weight:500;font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.links a{font-size:13px;color:var(--sweep);text-decoration:none;border:1px solid var(--line);border-radius:4px;padding:5px 9px}
+.links a:hover{border-color:var(--sweep)}
+.empty{color:var(--muted);font-size:13px}
+.tablewrap{overflow-x:auto;max-height:420px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-family:var(--f-data);font-size:12.5px;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:var(--panel);text-align:left;font-family:var(--f-display);font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th.n,td.n{text-align:right}
+td{padding:6px 8px;border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent);white-space:nowrap}
+tr.row{cursor:pointer}
+tr.row:hover td{background:color-mix(in srgb,var(--sweep) 7%,transparent)}
+tr.row.sel td{background:color-mix(in srgb,var(--target) 14%,transparent)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:var(--target);vertical-align:1px}
+.dot.r{background:var(--rotor)}
+.dot.e{background:var(--alert)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+footer{font-size:12px;color:var(--muted)}
+footer a{color:var(--sweep)}
+@media (prefers-reduced-motion:reduce){.scopebox{box-shadow:0 0 0 1px var(--line)}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Cheshire <span>Sky</span> Radar</h1>
+    <div class="status"><span id="chip" class="chip wait">CONNECTING</span><span id="upd">Fetching traffic…</span></div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="controls">
+    <div class="ctl"><label for="place">Centre</label>
+      <select id="place">
+        <option value="congleton">Congleton</option>
+        <option value="macc">Macclesfield</option>
+        <option value="nantwich">Nantwich</option>
+        <option value="sandbach">Sandbach</option>
+        <option value="man">Manchester Airport</option>
+        <option value="me">My location</option>
+      </select>
+    </div>
+    <div class="ctl"><span>Range</span>
+      <div class="seg" id="ranges" role="group" aria-label="Range in nautical miles">
+        <button type="button" data-r="10">10nm</button>
+        <button type="button" data-r="25" aria-pressed="true">25nm</button>
+        <button type="button" data-r="50">50nm</button>
+        <button type="button" data-r="100">100nm</button>
+      </div>
+    </div>
+    <label class="tog"><input type="checkbox" id="rotorOnly"> Helicopters only</label>
+    <label class="tog"><input type="checkbox" id="tags" checked> Data tags</label>
+  </div>
+
+  <div class="main">
+    <div class="scopebox"><canvas id="scope" aria-label="Radar scope showing nearby aircraft"></canvas></div>
+
+    <div class="side">
+      <div class="card detail" id="detail">
+        <h2>Selected</h2>
+        <p class="empty">Tap a target on the scope or a row below to see its details.</p>
+      </div>
+      <div class="card">
+        <h2>Traffic <span id="count">0</span></h2>
+        <div class="legend"><span><i class="dot"></i>Fixed wing</span><span><i class="dot r"></i>Helicopter</span><span><i class="dot e"></i>Emergency squawk</span></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Flight</th><th>Type</th><th class="n">Alt</th><th class="n">Kt</th><th class="n">Dist</th><th class="n">Brg</th></tr></thead>
+            <tbody id="list"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Live positions from the <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a> community ADS-B network (with <a href="https://airplanes.live" target="_blank" rel="noopener">airplanes.live</a> as a backup), refreshed every 10 seconds. Aircraft without ADS-B, and some military and private flights, won't appear. Distances in nautical miles.</footer>
+</div>
+
+<script>
+window.addEventListener('error',function(e){var b=document.getElementById('banner');if(b){b.hidden=false;b.textContent='Something went wrong drawing the radar: '+(e.message||'unknown error')+'. Send Claude a screenshot of this message.';}});
+(function(){
+  const PLACES={
+    congleton:{n:"Congleton",lat:53.1628,lon:-2.2130},
+    macc:{n:"Macclesfield",lat:53.2587,lon:-2.1253},
+    nantwich:{n:"Nantwich",lat:53.0670,lon:-2.5218},
+    sandbach:{n:"Sandbach",lat:53.1446,lon:-2.3613},
+    man:{n:"Manchester Airport",lat:53.3537,lon:-2.2750}
+  };
+  // Fixed landmarks drawn faintly on the scope for orientation
+  const MARKS=[
+    {n:"MAN",lat:53.3537,lon:-2.2750},{n:"LPL",lat:53.3336,lon:-2.8497},
+    {n:"Congleton",lat:53.1628,lon:-2.2130},{n:"Macclesfield",lat:53.2587,lon:-2.1253},
+    {n:"Nantwich",lat:53.0670,lon:-2.5218},{n:"Stoke",lat:53.0027,lon:-2.1794},
+    {n:"Crewe",lat:53.0979,lon:-2.4416},{n:"Buxton",lat:53.2591,lon:-1.9110},
+    {n:"Sandbach",lat:53.1446,lon:-2.3613},{n:"BHX",lat:52.4539,lon:-1.7480},
+    {n:"EMA",lat:52.8311,lon:-1.3281},{n:"Leeds Brad",lat:53.8659,lon:-1.6606}
+  ];
+  const ROTOR_TYPES=new Set(["A139","A169","A189","A109","A119","EC35","EC45","EC30","EC20","EC55","EC75","EC25","AS50","AS55","AS65","AS32","R22","R44","R66","B06","B407","B412","B429","B505","S76","S92","H160","H175","MD90","EH10","AW09","G2CA","PUMA","LYNX","H47","H60","EXPL","A149","NH90"]);
+  const EMERG={"7500":"Hijack","7600":"Radio failure","7700":"Emergency"};
+
+  const S={key:"congleton",centre:PLACES.congleton,range:25,ac:[],fetchedAt:0,mode:"wait",sel:null,rotorOnly:false,tags:true,demo:null};
+
+  const $=id=>document.getElementById(id);
+  const cv=$("scope"),cx=cv.getContext("2d");
+  const reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  try{const r=localStorage.getItem("csr.range");if(r)S.range=+r;const k=localStorage.getItem("csr.place");if(k&&PLACES[k]){S.key=k;S.centre=PLACES[k];}}catch(e){}
+  $("place").value=S.key;
+  setRangeButtons();
+
+  // ---------- geometry ----------
+  const toRad=d=>d*Math.PI/180;
+  function rel(lat,lon){ // nm east/north of centre
+    const c=S.centre;
+    return {x:(lon-c.lon)*60*Math.cos(toRad(c.lat)),y:(lat-c.lat)*60};
+  }
+  function distBrg(lat,lon){
+    const p=rel(lat,lon);
+    return {d:Math.hypot(p.x,p.y),b:(Math.atan2(p.x,p.y)*180/Math.PI+360)%360};
+  }
+  function project(lat,lon,gs,trk,dt){ // dead-reckon dt seconds ahead
+    if(!gs||trk==null||!isFinite(dt)||dt<=0)return [lat,lon];
+    const nm=gs*dt/3600, r=toRad(trk);
+    return [lat+nm*Math.cos(r)/60, lon+nm*Math.sin(r)/(60*Math.cos(toRad(lat)))];
+  }
+
+  // ---------- classification / formatting ----------
+  const isRotor=a=>a.category==="A7"||ROTOR_TYPES.has(a.t||"");
+  const isEmerg=a=>!!EMERG[a.squawk]||(a.emergency&&a.emergency!=="none");
+  const cs=a=>(a.flight||"").trim()||a.r||a.hex.toUpperCase();
+  function fmtAlt(a){
+    const v=a.alt_baro;
+    if(v==="ground")return "GND";
+    if(v==null||isNaN(v))return "—";
+    return v>=6000?"FL"+String(Math.round(v/100)).padStart(3,"0"):Math.round(v).toLocaleString("en-GB")+"ft";
+  }
+  const fmtNum=(v,d=0)=>v==null||isNaN(v)?"—":Number(v).toFixed(d);
+
+  // ---------- data ----------
+  async function getJSON(url){
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),4000);
+    try{const r=await fetch(url,{signal:ctl.signal,cache:"no-store"});if(!r.ok)throw new Error(r.status);return await r.json();}
+    finally{clearTimeout(t);}
+  }
+  async function fetchLive(){
+    const c=S.centre, rad=Math.min(250,Math.ceil(S.range*1.25));
+    const urls=[
+      `https://api.adsb.lol/v2/point/${c.lat.toFixed(4)}/${c.lon.toFixed(4)}/${rad}`,
+      `https://api.airplanes.live/v2/point/${c.lat.toFixed(4)}/${c.lon.toFixed(4)}/${rad}`
+    ];
+    try{
+      return await Promise.any(urls.map(u=>getJSON(u).then(j=>{if(j&&Array.isArray(j.ac))return j.ac;throw new Error("unexpected reply");})));
+    }catch(agg){
+      const errs=(agg.errors||[agg]).map(e=>e&&e.name==="AbortError"?"timed out":(e&&e.message)||"blocked");
+      throw new Error(errs.join(" / "));
+    }
+  }
+
+  // Demo traffic, used only when the live feed can't be reached
+  function makeDemo(){
+    const c=S.centre, list=[];
+    const fixed=[["EZY27KL","A320",34000,440],["RYR4QT","B738",36000,455],["TOM3BX","B38M",24000,410],["BAW1384","A319",17000,360],["LOG74","AT76",9000,250],["EXS82M","B738",31000,430],["TCX9JR","A321",12500,300],["VIR127","A35K",38000,480],["SHT7N","A320",6400,240],["G-DEMO","C172",2400,95]];
+    const rot=[["G-HELI","A139",1800,140],["NPAS21","EC35",1500,110],["HLE80","A169",1200,125]];
+    let i=0;
+    for(const [f,t,alt,gs] of fixed.concat(rot)){
+      const ang=Math.random()*Math.PI*2, dist=S.range*(0.15+Math.random()*0.8);
+      const lat=c.lat+dist*Math.cos(ang)/60, lon=c.lon+dist*Math.sin(ang)/(60*Math.cos(toRad(c.lat)));
+      list.push({hex:"de"+(1000+i++).toString(16),flight:f,t,r:f.startsWith("G-")?f:"",alt_baro:alt,gs,track:Math.round(Math.random()*360),lat,lon,squawk:String(1000+Math.floor(Math.random()*6000)),baro_rate:Math.round((Math.random()-.5)*1600),category:ROTOR_TYPES.has(t)?"A7":"A3"});
+    }
+    return list;
+  }
+
+  async function refresh(){
+    try{
+      const ac=await fetchLive();
+      S.ac=ac.filter(a=>a.lat!=null&&a.lon!=null);S.fetchedAt=Date.now();S.mode="live";
+      $("banner").hidden=true;
+    }catch(e){
+      S.err=e&&e.message||"blocked";
+      if(S.mode!=="demo"||!S.demo){S.demo=makeDemo();S.demoAt=Date.now();}
+      // move demo traffic forward so it looks alive between refreshes
+      const dt=(Date.now()-S.demoAt)/1000;
+      S.demo=S.demo.map(a=>{const [la,lo]=project(a.lat,a.lon,a.gs,a.track,dt);const t=(a.track+(isRotor(a)?(Math.random()-.5)*20:0)+360)%360;return {...a,lat:la,lon:lo,track:t};});
+      S.demoAt=Date.now();
+      S.ac=S.demo;S.fetchedAt=Date.now();S.mode="demo";
+      const b=$("banner");b.hidden=false;
+      const inClaude=/claude\.ai|claudeusercontent|anthropic/.test(location.hostname);
+      b.innerHTML=inClaude
+        ?"<b>Demo traffic.</b> The live aircraft feed can't be reached from inside Claude's preview, so these blips are simulated. Open the downloaded <b>cheshire-sky-radar.html</b> in a browser to see real aircraft."
+        :"<b>Demo traffic.</b> This browser couldn't reach the live aircraft feed, so these blips are simulated. <span class=\"why\"></span>";
+      const w=b.querySelector(".why");if(w)w.textContent="Opened from "+(location.protocol||"?")+" · reason: "+S.err+".";
+    }
+    updateStatus();renderList();renderDetail();
+  }
+
+  function updateStatus(){
+    const chip=$("chip");
+    chip.className="chip "+S.mode;
+    chip.textContent=S.mode==="live"?"LIVE":S.mode==="demo"?"DEMO":"CONNECTING";
+    const t=new Date(S.fetchedAt);
+    $("upd").textContent=`${S.centre.n} · updated ${t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
+  }
+
+  // ---------- current positions (dead-reckoned) ----------
+  function current(){
+    const dt=(Date.now()-S.fetchedAt)/1000;
+    const out=[];
+    for(const a of S.ac){
+      if(S.rotorOnly&&!isRotor(a))continue;
+      const age=dt+(a.seen_pos||a.seen||0);
+      const [lat,lon]=a.alt_baro==="ground"?[a.lat,a.lon]:project(a.lat,a.lon,a.gs,a.track,Math.min(age,40));
+      const db=distBrg(lat,lon);
+      if(db.d>S.range*1.02)continue;
+      out.push({a,lat,lon,...db});
+    }
+    return out.sort((p,q)=>p.d-q.d);
+  }
+
+  // ---------- list & detail ----------
+  function renderList(){
+    const rows=current();
+    $("count").textContent=rows.length+" within "+S.range+"nm";
+    const tb=$("list");tb.textContent="";
+    if(!rows.length){const tr=document.createElement("tr");tr.innerHTML=`<td colspan="6" class="empty">No ${S.rotorOnly?"helicopters":"aircraft"} inside ${S.range}nm right now.</td>`;tb.appendChild(tr);return;}
+    for(const r of rows){
+      const a=r.a, tr=document.createElement("tr");
+      tr.className="row"+(S.sel===a.hex?" sel":"");tr.tabIndex=0;
+      const dc=isEmerg(a)?"dot e":isRotor(a)?"dot r":"dot";
+      tr.innerHTML=`<td><i class="${dc}"></i></td><td></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td>`;
+      const td=tr.children;
+      td[0].append(cs(a));td[1].textContent=a.t||"—";td[2].textContent=fmtAlt(a);td[3].textContent=fmtNum(a.gs);
+      td[4].textContent=r.d.toFixed(1);td[5].textContent=String(Math.round(r.b)).padStart(3,"0")+"°";
+      const pick=()=>{S.sel=a.hex;renderList();renderDetail();};
+      tr.addEventListener("click",pick);tr.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();pick();}});
+      tb.appendChild(tr);
+    }
+  }
+  function renderDetail(){
+    const box=$("detail");
+    const r=current().find(x=>x.a.hex===S.sel);
+    if(!r){box.innerHTML='<h2>Selected</h2><p class="empty">Tap a target on the scope or a row in the list to see its details.</p>';return;}
+    const a=r.a, call=cs(a);
+    const kind=isRotor(a)?"Helicopter":"Aircraft";
+    const vr=a.baro_rate==null?"—":(a.baro_rate>0?"+":"")+Math.round(a.baro_rate).toLocaleString("en-GB")+" fpm";
+    const sq=a.squawk?(a.squawk+(EMERG[a.squawk]?" · "+EMERG[a.squawk]:"")):"—";
+    box.innerHTML=`<h2>Selected <span>${S.mode==="demo"?"demo":"live"}</span></h2>
+      <div class="cs"></div><div class="sub"></div>
+      <div class="kv">
+        <div><small>Altitude</small><b>${fmtAlt(a)}</b></div>
+        <div><small>Ground speed</small><b>${fmtNum(a.gs)} kt</b></div>
+        <div><small>Track</small><b>${a.track==null?"—":String(Math.round(a.track)).padStart(3,"0")+"°"}</b></div>
+        <div><small>Climb rate</small><b>${vr}</b></div>
+        <div><small>From ${S.centre.n}</small><b>${r.d.toFixed(1)}nm · ${String(Math.round(r.b)).padStart(3,"0")}°</b></div>
+        <div><small>Squawk</small><b style="${EMERG[a.squawk]?"color:var(--alert)":""}">${sq}</b></div>
+      </div>
+      <div class="links"></div>`;
+    box.querySelector(".cs").textContent=call;
+    box.querySelector(".sub").textContent=[kind,a.t,a.r,"ICAO "+a.hex.toUpperCase()].filter(Boolean).join(" · ");
+    if(S.mode==="live"){
+      const l=box.querySelector(".links");
+      const add=(href,txt)=>{const x=document.createElement("a");x.href=href;x.target="_blank";x.rel="noopener";x.textContent=txt;l.appendChild(x);};
+      add(a.r?`https://www.flightradar24.com/data/aircraft/${encodeURIComponent(a.r.toLowerCase())}`:`https://www.flightradar24.com/${encodeURIComponent(call)}`,"Flightradar24 ↗");
+      add(`https://globe.adsb.lol/?icao=${a.hex}`,"Track history ↗");
+      if(a.r&&a.r.startsWith("G-"))add(`https://siteapps.caa.co.uk/g-info/`,"CAA G-INFO ↗");
+    }
+  }
+
+  // ---------- scope drawing ----------
+  let W=0,H=0,dpr=1,hits=[];
+  function size(){
+    const r=cv.getBoundingClientRect();dpr=Math.min(2,window.devicePixelRatio||1);
+    W=r.width;H=r.height;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);cx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(size).observe(cv);size();
+
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C={line:css("--line"),sweep:css("--sweep"),target:css("--target"),rotor:css("--rotor"),alert:css("--alert"),muted:css("--muted"),ink:css("--ink")};
+  const PERIOD=4000;
+  const t0=performance.now();
+
+  function draw(now){
+    requestAnimationFrame(draw);
+    try{frame(now);}catch(err){if(!draw.warned){draw.warned=1;setTimeout(()=>{throw err;});}}
+  }
+  function frame(now){
+    if(!W||!H)size();
+    const R=Math.min(W,H)/2-6, ox=W/2, oy=H/2;
+    cx.clearRect(0,0,W,H);
+    const sweep=reduce?null:(((now-t0)%PERIOD)/PERIOD)*360;
+    const pxPerNm=R/S.range;
+    // rings
+    cx.lineWidth=1;cx.font=`500 10px ${css("--f-data")}`;
+    const step=S.range<=10?2.5:S.range<=25?5:S.range<=50?10:25;
+    for(let n=step;n<=S.range+0.01;n+=step){
+      cx.strokeStyle=C.line;cx.globalAlpha=n===S.range?1:.7;
+      cx.beginPath();cx.arc(ox,oy,n*pxPerNm,0,Math.PI*2);cx.stroke();
+      cx.globalAlpha=.8;cx.fillStyle=C.sweep;cx.fillText(n+"nm",ox+4,oy-n*pxPerNm+12);
+    }
+    cx.globalAlpha=1;
+    // bearing ticks + cardinal labels
+    for(let b=0;b<360;b+=10){
+      const r1=R-(b%30===0?10:5), a=toRad(b);
+      cx.strokeStyle=C.line;cx.beginPath();cx.moveTo(ox+Math.sin(a)*r1,oy-Math.cos(a)*r1);cx.lineTo(ox+Math.sin(a)*R,oy-Math.cos(a)*R);cx.stroke();
+    }
+    cx.fillStyle=C.muted;cx.font=`600 12px ${css("--f-display")}`;cx.textAlign="center";cx.textBaseline="middle";
+    [["N",0],["E",90],["S",180],["W",270]].forEach(([l,b])=>{const a=toRad(b),r=R-20;cx.fillText(l,ox+Math.sin(a)*r,oy-Math.cos(a)*r);});
+    // cross hairs
+    cx.strokeStyle=C.line;cx.globalAlpha=.5;cx.beginPath();cx.moveTo(ox-R,oy);cx.lineTo(ox+R,oy);cx.moveTo(ox,oy-R);cx.lineTo(ox,oy+R);cx.stroke();cx.globalAlpha=1;
+    // landmarks
+    cx.font=`400 10px ${css("--f-body")}`;
+    for(const m of MARKS){
+      const p=rel(m.lat,m.lon);if(Math.hypot(p.x,p.y)>S.range*.95)continue;
+      const x=ox+p.x*pxPerNm,y=oy-p.y*pxPerNm;
+      cx.fillStyle=C.muted;cx.globalAlpha=.55;cx.fillRect(x-1.5,y-1.5,3,3);cx.fillText(m.n,x,y+10);
+    }
+    cx.globalAlpha=1;
+    // centre
+    cx.fillStyle=C.sweep;cx.beginPath();cx.arc(ox,oy,2.5,0,Math.PI*2);cx.fill();
+    // sweep beam
+    if(sweep!=null){
+      const a=toRad(sweep-90);
+      const g=cx.createConicGradient?cx.createConicGradient(a-toRad(60),ox,oy):null;
+      if(g){
+        g.addColorStop(0,"rgba(127,216,228,0)");g.addColorStop(60/360,"rgba(127,216,228,0.16)");g.addColorStop(60/360+0.0001,"rgba(127,216,228,0)");g.addColorStop(1,"rgba(127,216,228,0)");
+        cx.fillStyle=g;cx.beginPath();cx.moveTo(ox,oy);cx.arc(ox,oy,R,a-toRad(60),a);cx.closePath();cx.fill();
+      }
+      cx.strokeStyle=C.sweep;cx.globalAlpha=.7;cx.beginPath();cx.moveTo(ox,oy);cx.lineTo(ox+Math.cos(a)*R,oy+Math.sin(a)*R);cx.stroke();cx.globalAlpha=1;
+    }
+    // targets
+    hits=[];
+    cx.textAlign="left";cx.textBaseline="alphabetic";
+    for(const r of current()){
+      const a=r.a, x=ox+Math.sin(toRad(r.b))*r.d*pxPerNm, y=oy-Math.cos(toRad(r.b))*r.d*pxPerNm;
+      const col=isEmerg(a)?C.alert:isRotor(a)?C.rotor:C.target;
+      const behind=sweep==null?0:((sweep-r.b)+360)%360;
+      const glow=sweep==null?1:Math.max(.45,1-behind/360*.6);
+      const sel=a.hex===S.sel;
+      cx.globalAlpha=glow;cx.strokeStyle=col;cx.fillStyle=col;cx.lineWidth=1.4;
+      // heading vector: 1 minute of travel
+      if(a.track!=null&&a.gs){const len=Math.max(8,a.gs/60*pxPerNm),t=toRad(a.track);cx.beginPath();cx.moveTo(x,y);cx.lineTo(x+Math.sin(t)*len,y-Math.cos(t)*len);cx.stroke();}
+      if(isRotor(a)){cx.beginPath();cx.arc(x,y,4.5,0,Math.PI*2);cx.stroke();cx.beginPath();cx.arc(x,y,1.6,0,Math.PI*2);cx.fill();}
+      else{cx.fillRect(x-3.5,y-3.5,7,7);}
+      if(sel){cx.globalAlpha=1;cx.lineWidth=1.5;cx.strokeStyle=C.ink;cx.strokeRect(x-9,y-9,18,18);}
+      if(S.tags||sel){
+        cx.globalAlpha=sel?1:glow*.95;cx.fillStyle=sel?C.ink:col;
+        cx.font=`600 11px ${css("--f-data")}`;cx.fillText(cs(a),x+9,y-4);
+        cx.font=`400 10px ${css("--f-data")}`;cx.fillText(`${fmtAlt(a)} ${fmtNum(a.gs)}`,x+9,y+8);
+      }
+      cx.globalAlpha=1;
+      hits.push({x,y,hex:a.hex});
+    }
+  }
+  requestAnimationFrame(draw);
+
+  cv.addEventListener("click",e=>{
+    const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+    let best=null,bd=22;
+    for(const h of hits){const d=Math.hypot(h.x-x,h.y-y);if(d<bd){bd=d;best=h;}}
+    S.sel=best?best.hex:null;renderList();renderDetail();
+  });
+
+  // ---------- controls ----------
+  function setRangeButtons(){document.querySelectorAll("#ranges button").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.r===S.range)));}
+  $("ranges").addEventListener("click",e=>{
+    const b=e.target.closest("button");if(!b)return;S.range=+b.dataset.r;setRangeButtons();
+    try{localStorage.setItem("csr.range",S.range);}catch(_){}
+    S.demo=null;refresh();
+  });
+  $("place").addEventListener("change",e=>{
+    const v=e.target.value;
+    if(v==="me"){
+      if(!navigator.geolocation){e.target.value=S.key;return;}
+      $("upd").textContent="Finding your location…";
+      navigator.geolocation.getCurrentPosition(p=>{
+        S.key="me";S.centre={n:"Your location",lat:p.coords.latitude,lon:p.coords.longitude};S.demo=null;refresh();
+      },()=>{e.target.value=S.key;$("upd").textContent="Location unavailable, staying on "+S.centre.n;},{timeout:8000,maximumAge:60000});
+      return;
+    }
+    S.key=v;S.centre=PLACES[v];S.demo=null;S.sel=null;
+    try{localStorage.setItem("csr.place",v);}catch(_){}
+    refresh();
+  });
+  $("rotorOnly").addEventListener("change",e=>{S.rotorOnly=e.target.checked;renderList();renderDetail();});
+  $("tags").addEventListener("change",e=>{S.tags=e.target.checked;});
+
+  setInterval(()=>{renderList();renderDetail();},2000);
+  setInterval(refresh,10000);
+  refresh();
+})();
+</script>
+</body></html>
