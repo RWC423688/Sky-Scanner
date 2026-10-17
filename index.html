@@ -199,7 +199,7 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
 
   // ---------- data ----------
   async function getJSON(url){
-    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),4000);
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),6000);
     try{const r=await fetch(url,{signal:ctl.signal,cache:"no-store"});if(!r.ok)throw new Error(r.status);return await r.json();}
     finally{clearTimeout(t);}
   }
@@ -232,6 +232,16 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
         const ac=fromOpenSky(j);lastSky={at:Date.now(),key,ac};return ac;
       }]
     ];
+    // The feeds answer a browser tab directly but don't allow other web pages to read them (CORS),
+    // so fall back to a free public relay that adds the missing permission header.
+    const lolUrl=`https://api.adsb.lol/v2/point/${la}/${lo}/${rad}`;
+    const alUrl=`https://api.airplanes.live/v2/point/${la}/${lo}/${rad}`;
+    sources.push(
+      ["adsb.lol (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(lolUrl)}`).then(readsb)],
+      ["airplanes.live (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(alUrl)}`).then(readsb)],
+      ["adsb.lol (relay 2)",()=>getJSON(`https://api.allorigins.win/raw?url=${encodeURIComponent(lolUrl)}`).then(readsb)],
+      ["adsb.lol (relay 3)",()=>getJSON(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(lolUrl)}`).then(readsb)]
+    );
     // stick with whichever source worked last time
     if(S.src){const i=sources.findIndex(s=>s[0]===S.src);if(i>0)sources.unshift(sources.splice(i,1)[0]);}
     const errs=[];
