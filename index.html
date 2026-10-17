@@ -203,18 +203,44 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
     try{const r=await fetch(url,{signal:ctl.signal,cache:"no-store"});if(!r.ok)throw new Error(r.status);return await r.json();}
     finally{clearTimeout(t);}
   }
+  // OpenSky reports metres and m/s; convert to the readsb shape the rest of the page uses
+  function fromOpenSky(j){
+    return (j.states||[]).filter(s=>s[5]!=null&&s[6]!=null).map(s=>({
+      hex:String(s[0]||"").toLowerCase(),flight:(s[1]||"").trim(),lat:s[6],lon:s[5],
+      alt_baro:s[8]?"ground":(s[7]!=null?Math.round(s[7]*3.28084):null),
+      gs:s[9]!=null?Math.round(s[9]*1.94384):null,track:s[10],
+      baro_rate:s[11]!=null?Math.round(s[11]*196.85):null,squawk:s[14]||"",
+      category:s[17]===8?"A7":"",seen_pos:s[3]?Math.max(0,Date.now()/1000-s[3]):0
+    }));
+  }
+  let lastSky={at:0,key:"",ac:null};
   async function fetchLive(){
     const c=S.centre, rad=Math.min(250,Math.ceil(S.range*1.25));
-    const urls=[
-      `https://api.adsb.lol/v2/point/${c.lat.toFixed(4)}/${c.lon.toFixed(4)}/${rad}`,
-      `https://api.airplanes.live/v2/point/${c.lat.toFixed(4)}/${c.lon.toFixed(4)}/${rad}`
+    const la=c.lat.toFixed(4), lo=c.lon.toFixed(4);
+    const readsb=j=>{if(j&&Array.isArray(j.ac))return j.ac;if(j&&Array.isArray(j.aircraft))return j.aircraft;throw new Error("unexpected reply");};
+    const sources=[
+      ["adsb.lol",()=>getJSON(`https://api.adsb.lol/v2/point/${la}/${lo}/${rad}`).then(readsb)],
+      ["airplanes.live",()=>getJSON(`https://api.airplanes.live/v2/point/${la}/${lo}/${rad}`).then(readsb)],
+      ["adsb.fi",()=>getJSON(`https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/${Math.min(rad,250)}`).then(readsb)],
+      ["adsb.one",()=>getJSON(`https://api.adsb.one/v2/point/${la}/${lo}/${rad}`).then(readsb)],
+      ["OpenSky",async()=>{
+        // free OpenSky allowance is small, so ask at most once a minute
+        const key=la+lo+S.range;
+        if(lastSky.ac&&lastSky.key===key&&Date.now()-lastSky.at<60000)return lastSky.ac;
+        const dLat=rad/60, dLon=rad/(60*Math.cos(toRad(c.lat)));
+        const j=await getJSON(`https://opensky-network.org/api/states/all?lamin=${(c.lat-dLat).toFixed(3)}&lomin=${(c.lon-dLon).toFixed(3)}&lamax=${(c.lat+dLat).toFixed(3)}&lomax=${(c.lon+dLon).toFixed(3)}&extended=1`);
+        const ac=fromOpenSky(j);lastSky={at:Date.now(),key,ac};return ac;
+      }]
     ];
-    try{
-      return await Promise.any(urls.map(u=>getJSON(u).then(j=>{if(j&&Array.isArray(j.ac))return j.ac;throw new Error("unexpected reply");})));
-    }catch(agg){
-      const errs=(agg.errors||[agg]).map(e=>e&&e.name==="AbortError"?"timed out":(e&&e.message)||"blocked");
-      throw new Error(errs.join(" / "));
+    // stick with whichever source worked last time
+    if(S.src){const i=sources.findIndex(s=>s[0]===S.src);if(i>0)sources.unshift(sources.splice(i,1)[0]);}
+    const errs=[];
+    for(const [name,go] of sources){
+      try{const ac=await go();S.src=name;return ac;}
+      catch(e){const m=e&&e.name==="AbortError"?"timed out":/fetch|network|load/i.test((e&&e.message)||"")?"blocked":((e&&e.message)||"blocked");errs.push(name+" "+m);}
     }
+    S.src=null;
+    throw new Error(errs.join(" · "));
   }
 
   // Demo traffic, used only when the live feed can't be reached
@@ -231,7 +257,9 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
     return list;
   }
 
+  let busy=false;
   async function refresh(){
+    if(busy)return;busy=true;
     try{
       const ac=await fetchLive();
       S.ac=ac.filter(a=>a.lat!=null&&a.lon!=null);S.fetchedAt=Date.now();S.mode="live";
@@ -249,8 +277,9 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
       b.innerHTML=inClaude
         ?"<b>Demo traffic.</b> The live aircraft feed can't be reached from inside Claude's preview, so these blips are simulated. Open the downloaded <b>cheshire-sky-radar.html</b> in a browser to see real aircraft."
         :"<b>Demo traffic.</b> This browser couldn't reach the live aircraft feed, so these blips are simulated. <span class=\"why\"></span>";
-      const w=b.querySelector(".why");if(w)w.textContent="Opened from "+(location.protocol||"?")+" · reason: "+S.err+".";
+      const w=b.querySelector(".why");if(w)w.textContent="Feeds tried: "+S.err+". Send Claude a screenshot of this box.";
     }
+    busy=false;
     updateStatus();renderList();renderDetail();
   }
 
@@ -259,7 +288,7 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
     chip.className="chip "+S.mode;
     chip.textContent=S.mode==="live"?"LIVE":S.mode==="demo"?"DEMO":"CONNECTING";
     const t=new Date(S.fetchedAt);
-    $("upd").textContent=`${S.centre.n} · updated ${t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
+    $("upd").textContent=`${S.centre.n}${S.mode==="live"&&S.src?" · via "+S.src:""} · updated ${t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
   }
 
   // ---------- current positions (dead-reckoned) ----------
