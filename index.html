@@ -198,8 +198,8 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
   const fmtNum=(v,d=0)=>v==null||isNaN(v)?"—":Number(v).toFixed(d);
 
   // ---------- data ----------
-  async function getJSON(url){
-    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),6000);
+  async function getJSON(url,ms=5000){
+    const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),ms);
     try{const r=await fetch(url,{signal:ctl.signal,cache:"no-store"});if(!r.ok)throw new Error(r.status);return await r.json();}
     finally{clearTimeout(t);}
   }
@@ -237,10 +237,10 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
     const lolUrl=`https://api.adsb.lol/v2/point/${la}/${lo}/${rad}`;
     const alUrl=`https://api.airplanes.live/v2/point/${la}/${lo}/${rad}`;
     sources.push(
-      ["adsb.lol (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(lolUrl)}`).then(readsb)],
-      ["airplanes.live (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(alUrl)}`).then(readsb)],
-      ["adsb.lol (relay 2)",()=>getJSON(`https://api.allorigins.win/raw?url=${encodeURIComponent(lolUrl)}`).then(readsb)],
-      ["adsb.lol (relay 3)",()=>getJSON(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(lolUrl)}`).then(readsb)]
+      ["adsb.lol (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(lolUrl)}`,12000).then(readsb)],
+      ["airplanes.live (relay)",()=>getJSON(`https://corsproxy.io/?url=${encodeURIComponent(alUrl)}`,12000).then(readsb)],
+      ["adsb.lol (relay 2)",()=>getJSON(`https://api.allorigins.win/raw?url=${encodeURIComponent(lolUrl)}`,12000).then(readsb)],
+      ["adsb.lol (relay 3)",()=>getJSON(`https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(lolUrl)}`,12000).then(readsb)]
     );
     // stick with whichever source worked last time
     if(S.src){const i=sources.findIndex(s=>s[0]===S.src);if(i>0)sources.unshift(sources.splice(i,1)[0]);}
@@ -272,10 +272,12 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
     if(busy)return;busy=true;
     try{
       const ac=await fetchLive();
-      S.ac=ac.filter(a=>a.lat!=null&&a.lon!=null);S.fetchedAt=Date.now();S.mode="live";
+      S.ac=ac.filter(a=>a.lat!=null&&a.lon!=null);S.fetchedAt=Date.now();S.mode="live";S.lastLive=Date.now();S.retrying=false;
       $("banner").hidden=true;
     }catch(e){
       S.err=e&&e.message||"blocked";
+      // a slow relay now and then shouldn't wipe real traffic: keep the last live picture for up to 2 minutes
+      if(S.lastLive&&Date.now()-S.lastLive<120000&&!false){S.retrying=true;busy=false;updateStatus();return;}
       if(S.mode!=="demo"||!S.demo){S.demo=makeDemo();S.demoAt=Date.now();}
       // move demo traffic forward so it looks alive between refreshes
       const dt=(Date.now()-S.demoAt)/1000;
@@ -296,8 +298,8 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
   function updateStatus(){
     const chip=$("chip");
     chip.className="chip "+S.mode;
-    chip.textContent=S.mode==="live"?"LIVE":S.mode==="demo"?"DEMO":"CONNECTING";
-    const t=new Date(S.fetchedAt);
+    chip.textContent=S.mode==="live"?(S.retrying?"LIVE · RETRYING":"LIVE"):S.mode==="demo"?"DEMO":"CONNECTING";
+    const t=new Date(S.mode==="live"&&S.lastLive?S.lastLive:S.fetchedAt);
     $("upd").textContent=`${S.centre.n}${S.mode==="live"&&S.src?" · via "+S.src:""} · updated ${t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
   }
 
@@ -462,7 +464,7 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
   // ---------- controls ----------
   function setRangeButtons(){document.querySelectorAll("#ranges button").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.r===S.range)));}
   $("ranges").addEventListener("click",e=>{
-    const b=e.target.closest("button");if(!b)return;S.range=+b.dataset.r;setRangeButtons();
+    const b=e.target.closest("button");if(!b)return;S.range=+b.dataset.r;setRangeButtons();S.lastLive=0;
     try{localStorage.setItem("csr.range",S.range);}catch(_){}
     S.demo=null;refresh();
   });
@@ -472,11 +474,11 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
       if(!navigator.geolocation){e.target.value=S.key;return;}
       $("upd").textContent="Finding your location…";
       navigator.geolocation.getCurrentPosition(p=>{
-        S.key="me";S.centre={n:"Your location",lat:p.coords.latitude,lon:p.coords.longitude};S.demo=null;refresh();
+        S.key="me";S.centre={n:"Your location",lat:p.coords.latitude,lon:p.coords.longitude};S.lastLive=0;S.demo=null;refresh();
       },()=>{e.target.value=S.key;$("upd").textContent="Location unavailable, staying on "+S.centre.n;},{timeout:8000,maximumAge:60000});
       return;
     }
-    S.key=v;S.centre=PLACES[v];S.demo=null;S.sel=null;
+    S.key=v;S.centre=PLACES[v];S.demo=null;S.sel=null;S.lastLive=0;
     try{localStorage.setItem("csr.place",v);}catch(_){}
     refresh();
   });
@@ -484,7 +486,7 @@ window.addEventListener('error',function(e){var b=document.getElementById('banne
   $("tags").addEventListener("change",e=>{S.tags=e.target.checked;});
 
   setInterval(()=>{renderList();renderDetail();},2000);
-  setInterval(refresh,10000);
+  setInterval(refresh,15000);
   refresh();
 })();
 </script>
